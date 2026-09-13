@@ -1,0 +1,16 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: codebase
+
+resources:
+  - namespace.yaml
+  - configmap.yaml
+  - pvc.yaml
+  - deployment.yaml
+  - service.yaml
+  - ingress.yaml
+
+# secret.yaml.example is NOT included — copy it to secret.yaml, fill in real
+# values, and either add it here or apply it with `kubectl apply -f secret.yaml`.
+# Keeping secrets out of the manifest tree prevents accidental commits.

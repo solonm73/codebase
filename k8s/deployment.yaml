@@ -1,0 +1,132 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: codebase
+  namespace: codebase
+  labels:
+    app: codebase
+spec:
+  # SQLite + ReadWriteOnce PVC → only one writer pod is safe.
+  # Bump to >1 only after migrating the database off SQLite.
+  replicas: 1
+  strategy:
+    type: Recreate   # avoid two pods racing for the same RWO volume
+  selector:
+    matchLabels:
+      app: codebase
+  template:
+    metadata:
+      labels:
+        app: codebase
+    spec:
+      # Allow Caddy to bind :81 and Next.js :3000 inside the pod.
+      # No hostNetwork — we publish the containerPort via the Service below.
+      containers:
+        - name: app
+          # Built and published by .github/workflows/docker-publish.yml to
+          # GitHub Container Registry. Replace <owner> with the GitHub org or
+          # user that owns the repo. Pin to a SHA (e.g. :a1b2c3d) in
+          # production instead of :latest for reproducibility.
+          image: ghcr.io/<owner>/codebase:latest
+          imagePullPolicy: IfNotPresent
+
+          # Caddy listens on :81; Next.js listens on :3000 (internal only).
+          # The Service forwards external traffic to :81.
+          ports:
+            - name: http
+              containerPort: 81
+              protocol: TCP
+            - name: nextjs
+              containerPort: 3000
+              protocol: TCP
+
+          envFrom:
+            - configMapRef:
+                name: codebase-config
+            - secretRef:
+                name: codebase-secret
+
+          env:
+            # Force PYTHONPATH only if you ship Python deps via /app/python-runtime.
+            # The image already includes them baked-in; this just hardens the path.
+            - name: PYTHONPATH
+              value: "/app/python-runtime/site-packages"
+            - name: PYTHONDONTWRITEBYTECODE
+              value: "1"
+            - name: PYTHONUNBUFFERED
+              value: "1"
+
+          volumeMounts:
+            # Caddyfile — mounted read-only from the ConfigMap.
+            - name: caddyfile
+              mountPath: /etc/caddy/Caddyfile
+              subPath: Caddyfile
+              readOnly: true
+
+            # SQLite database — backed by the PVC below.
+            - name: db
+              mountPath: /app/db
+
+            # mini-services / python-runtime are baked into the image at /app,
+            # so no separate mount is needed.
+
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "256Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1Gi"
+
+          # Readiness: the existing /api/route.ts GET handler returns JSON, so it
+          # is a reliable probe path (does not depend on Next.js client-side
+          # hydration finishing). Caddy already reverse-proxies :3000 → :81.
+          readinessProbe:
+            httpGet:
+              path: /api
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 6
+          livenessProbe:
+            httpGet:
+              path: /api
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+
+          # Graceful shutdown — give Next.js time to drain in-flight requests.
+          lifecycle:
+            preStop:
+              exec:
+                # Caddy is the main process (per start.sh: `exec caddy run ...`).
+                # SIGTERM it so it stops accepting new conns, then sleep a bit
+                # so Node can finish serving in-flight requests before SIGKILL.
+                command: ["/bin/sh", "-c", "pkill -TERM caddy || true; sleep 5"]
+
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            readOnlyRootFilesystem: false  # /app needs to be writable for /tmp
+            capabilities:
+              drop: ["ALL"]
+
+      volumes:
+        - name: caddyfile
+          configMap:
+            name: codebase-config
+            items:
+              - key: Caddyfile
+                path: Caddyfile
+        - name: db
+          persistentVolumeClaim:
+            claimName: codebase-db
+
+      # Keep pod-level security sane.
+      securityContext:
+        fsGroup: 1000

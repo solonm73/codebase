@@ -1,0 +1,42 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: codebase
+  namespace: codebase
+  labels:
+    app: codebase
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: "16m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
+    # WebSocket support — Next.js can use them, and so can any /ws path.
+    nginx.ingress.kubernetes.io/proxy-http-version: "1.1"
+spec:
+  ingressClassName: nginx
+  # No TLS block by default — supply your own cert-manager Certificate or
+  # pre-provisioned Secret and reference it under tls[].hosts below.
+  tls: []
+  rules:
+    # The host is left empty so this Ingress matches any host the controller
+    # sees. Override with a real hostname in production:
+    #
+    #   - host: app.example.com
+    #     http:
+    #       paths:
+    #         - path: /
+    #           pathType: Prefix
+    #           backend:
+    #             service:
+    #               name: codebase
+    #               port:
+    #                 number: 80
+    - host: REPLACE_ME_WITH_PUBLIC_HOSTNAME
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: codebase
+                port:
+                  number: 80

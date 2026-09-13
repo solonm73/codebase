@@ -1,0 +1,44 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: codebase-config
+  namespace: codebase
+  labels:
+    app: codebase
+data:
+  # Caddyfile mounted at /etc/caddy/Caddyfile so `caddy run` picks it up.
+  # Mirrors the existing repo Caddyfile: multi-port routing via XTransformPort
+  # query string + default reverse-proxy to Next.js on :3000.
+  Caddyfile: |
+    :81 {
+        @transform_port_query {
+            query XTransformPort=*
+        }
+
+        handle @transform_port_query {
+            reverse_proxy localhost:{query.XTransformPort} {
+                header_up Host {host}
+                header_up X-Forwarded-For {remote_host}
+                header_up X-Forwarded-Proto {scheme}
+                header_up X-Real-IP {remote_host}
+            }
+        }
+
+        handle {
+            reverse_proxy localhost:3000 {
+                header_up Host {host}
+                header_up X-Forwarded-For {remote_host}
+                header_up X-Forwarded-Proto {scheme}
+                header_up X-Real-IP {remote_host}
+            }
+        }
+    }
+
+  NODE_ENV: "production"
+  PORT: "3000"
+  HOSTNAME: "0.0.0.0"
+  # Database lives inside the PVC mounted at /app/db. This is the same path
+  # start.sh uses as DEFAULT_PACKAGED_DB_PATH, so the existing health-check
+  # logic (start.sh:80-89) still applies.
+  DATABASE_URL: "file:/app/db/custom.db"
+  NEXT_TELEMETRY_DISABLED: "1"

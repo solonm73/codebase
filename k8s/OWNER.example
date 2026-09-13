@@ -1,0 +1,38 @@
+# Owner / Registry reference
+
+تمام manifest های این پوشه به یه placeholder `<owner>` اشاره می‌کنن. قبل از
+deploy، این مقدار رو با GitHub owner (org یا username) که image رو publish
+می‌کنه عوض کن.
+
+## فایل‌هایی که باید ویرایش بشن
+
+```
+k8s/deployment.yaml       image: ghcr.io/<owner>/codebase:latest
+.github/workflows/        (نیازی به تغییر نیست — IMAGE_NAME خودش درست می‌شه)
+```
+
+## روش سریع با `sed`
+
+```bash
+cd /home/mohammadreza-mehrabani/projects/codebase
+
+# owner رو جایگزین کن (مثلاً: my-org یا mohammadreza-mehrabani)
+sed -i 's/<owner>/my-org/g' k8s/deployment.yaml
+
+# چک کن
+grep -rn '<owner>' k8s/ .github/   # باید خالی باشه
+```
+
+## پیدا کردن owner از URL ریپو
+
+اگه ریپو `github.com/my-org/codebase` باشه، owner = `my-org`.
+
+## Production: pin به SHA
+
+به‌جای `:latest` از SHA کوتاه استفاده کن تا image قابل پیش‌بینی باشه:
+
+```yaml
+image: ghcr.io/my-org/codebase:a1b2c3d
+```
+
+هر push به main یه tag مثل `<sha[:7]>` می‌سازه که توی Packages قابل دیدنه.
