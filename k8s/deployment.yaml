@@ -24,10 +24,16 @@ spec:
       containers:
         - name: app
           # Built and published by .github/workflows/docker-publish.yml to
-          # GitHub Container Registry. Replace <owner> with the GitHub org or
-          # user that owns the repo. Pin to a SHA (e.g. :a1b2c3d) in
-          # production instead of :latest for reproducibility.
-          image: ghcr.io/<owner>/codebase:latest
+          # GitHub Container Registry. The owner/repo is set by the Kustomize
+          # `images:` block in kustomization.yaml, which derives the value
+          # from the IMAGE_OWNER env var at apply time. The default below
+          # works for any repo; override with:
+          #
+          #   IMAGE_OWNER=my-org ./k8s/setup.sh apply
+          #
+          # Pin to a SHA (e.g. :a1b2c3d) in production instead of :latest
+          # for reproducibility — see k8s/setup.sh.
+          image: ghcr.io/your-org/codebase:latest
           imagePullPolicy: IfNotPresent
 
           # Caddy listens on :81; Next.js listens on :3000 (internal only).

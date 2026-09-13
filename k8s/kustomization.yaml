@@ -11,6 +11,19 @@ resources:
   - service.yaml
   - ingress.yaml
 
+# Image registry reference. Default works for any GitHub repo that pushed
+# the image via .github/workflows/docker-publish.yml. Override per-fork by
+# exporting IMAGE_OWNER before running `kubectl apply -k` (or use
+# k8s/setup.sh which wraps this).
+#
+# Kustomize rewrites the `image:` field on every container it finds in the
+# Deployment, so forks don't have to edit any YAML.
+images:
+  - name: ghcr.io/your-org/codebase
+    newName: ghcr.io/$(IMAGE_OWNER)/codebase
+    newTag: latest
+
 # secret.yaml.example is NOT included — copy it to secret.yaml, fill in real
-# values, and either add it here or apply it with `kubectl apply -f secret.yaml`.
-# Keeping secrets out of the manifest tree prevents accidental commits.
+# values, and apply with `kubectl apply -f secret.yaml`. Keeping secrets out
+# of the manifest tree prevents accidental commits.
+

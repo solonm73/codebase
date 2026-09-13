@@ -1,12 +1,9 @@
 # Kubernetes manifests for `codebase`
 
-این پوشه یه مجموعه manifest کوبرنتیز برای اپ Next.js پروژه فراهم می‌کنه. طراحی
-بر مبنای تصمیمات زیر:
-
-- **تک‌پد، همه‌چیز تو یه container** (Caddy + Next.js + mini-services)
-- **SQLite با PVC** و `replicas: 1` (ساده‌ترین حالت)
-- **Nginx Ingress Controller**
-- **Image registry:** `docker.io/your-org/codebase`
+این پوشه manifest های کوبرنتیز رو نگه می‌داره به‌صورتی که **کاملاً repo-agnostic**
+باشن: اگه چند بار fork بگیری، YAML ها رو **هیچ‌وقت نیازی به ویرایش نداری**.
+تنها چیزی که بین fork‌ها عوض می‌شه، env varهای `IMAGE_OWNER` و `HOSTNAME`
+هست که موقع `apply` پاس می‌شن.
 
 ---
 
@@ -16,104 +13,171 @@
 |------|-------|
 | `namespace.yaml` | Namespace `codebase` |
 | `configmap.yaml` | Caddyfile + env vars غیرحساس |
-| `secret.yaml.example` | Template برای `next-auth` و URL. کپی کن به `secret.yaml` و مقدار واقعی بذار |
+| `secret.yaml.example` | Template — `init` خودش ازش می‌سازه `secret.yaml` |
 | `pvc.yaml` | PVC یک گیگابایتی برای SQLite (ReadWriteOnce) |
-| `deployment.yaml` | Deployment اصلی با readiness/liveness probe |
+| `deployment.yaml` | Deployment اصلی (image توسط Kustomize override می‌شه) |
 | `service.yaml` | ClusterIP Service که به پورت 81 (Caddy) فوروارد می‌کنه |
-| `ingress.yaml` | Nginx Ingress — hostname رو باید عوض کنی |
-| `kustomization.yaml` | همهٔ فایل‌های بالا رو با هم load می‌کنه |
+| `ingress.yaml` | Nginx Ingress — host هم پارامتری عوض می‌شه |
+| `kustomization.yaml` | base + image override از `IMAGE_OWNER` env var |
 | `Dockerfile` | تصویر production (multi-stage، Bun + Caddy) |
-| `OWNER.example` | راهنمای جایگزینی `<owner>` با GitHub owner واقعی |
+| `setup.sh` | ⭐ **نقطهٔ ورود واحد برای همهٔ fork‌ها** |
+| `README.md` | همین فایل |
 
 ---
 
-## مراحل دیپلوی
+## 🚀 دیپلوی یه fork جدید (۳ مرحله)
 
-### ۱. بیلد و push کردن image
+### مرحله ۱: workflow رو push کن تا image بسازه
 
-**روش خودکار (توصیه‌شده):** workflow `.github/workflows/docker-publish.yml`
-با push به main یا هر tag `v*`، image رو توی `ghcr.io/<owner>/codebase`
-می‌سازه و publish می‌کنه. فقط کافیه `<owner>` رو با GitHub org/username واقعی
-عوض کنی (راهنمای کامل: `k8s/OWNER.example`).
+توی GitHub، Settings → Actions → General → Workflow permissions مطمئن شو
+**"Read and write permissions"** فعاله.
 
-```bash
-cd /home/mohammadreza-mehrabani/projects/codebase
-sed -i 's/<owner>/my-org/g' k8s/deployment.yaml
-```
-
-**روش دستی (اگه workflow نداری یا تست محلی می‌خوای):**
+بعد:
 
 ```bash
-cd /home/mohammadreza-mehrabani/projects/codebase
-docker build -f k8s/Dockerfile -t ghcr.io/my-org/codebase:latest .
-docker push ghcr.io/my-org/codebase:latest
+# روی main
+git push origin main
+
+# یا یه tag
+git tag v1.0.0 && git push origin v1.0.0
 ```
 
-### ۲. تنظیم secret
+workflow `.github/workflows/docker-publish.yml` فعال می‌شه و image رو توی
+`ghcr.io/<owner>/<repo>:latest` منتشر می‌کنه (`<owner>` = نام اکانت شما).
+
+> **نکته:** اگه می‌خوای cluster بتونه بدون credential بکشه، برو
+> GitHub → Packages → `<repo>` → Package settings → Change visibility → Public.
+
+### مرحله ۲: secret بساز
 
 ```bash
-cp k8s/secret.yaml.example k8s/secret.yaml
-
-# کلید next-auth رو بساز:
-openssl rand -base64 32
-
-# فایل رو ویرایش کن و NEXTAUTH_SECRET و NEXTAUTH_URL رو پر کن.
-# NEXTAUTH_URL باید با hostname اینگرس یکی باشه.
+./k8s/setup.sh init
 ```
 
-### ۳. تنظیم hostname
+این دستور `secret.yaml` رو از `secret.yaml.example` می‌سازه و با `openssl rand`
+یه کلید تصادفی می‌ذاره. اگه `NEXTAUTH_SECRET` و `HOSTNAME` رو قبلاً export
+کرده باشی، اون‌ها استفاده می‌شن.
 
-تو `k8s/ingress.yaml` خط `host: REPLACE_ME_WITH_PUBLIC_HOSTNAME` رو با دامنهٔ
-واقعی عوض کن (مثلاً `app.example.com`).
+### مرحله ۳: deploy
 
-اگه TLS می‌خوای، cert-manager یا Secret دستی اضافه کن:
+```bash
+# مقادیر fork خودت رو بذار و deploy کن
+IMAGE_OWNER="my-github-username" \
+HOSTNAME="app.example.com" \
+NEXTAUTH_SECRET="$(openssl rand -base64 32)" \
+./k8s/setup.sh apply
+```
+
+تمام. `kubectl -n codebase get pods,svc,ingress` بزن و ببین همه چی بالا اومده.
+
+---
+
+## 📋 دستورات setup.sh
+
+| Command | کار |
+|---------|-----|
+| `./k8s/setup.sh init` | ساختن `secret.yaml` از template |
+| `./k8s/setup.sh render` | چاپ manifest رندر‌شده (برای دیباگ یا gitops) |
+| `./k8s/setup.sh apply` | اعمال به کلاستر فعلی kubectl context |
+| `./k8s/setup.sh delete` | پاک کردن namespace و secret |
+
+همهٔ دستورات env varهای زیر رو می‌خونن:
+
+| متغیر | پیش‌فرض | توضیح |
+|-------|---------|-------|
+| `IMAGE_OWNER` | `your-org` | GitHub owner که image رو publish کرده |
+| `IMAGE_TAG` | `latest` | tag ایمیج (مثلاً SHA برای reproducibility) |
+| `HOSTNAME` | _(خالی)_ | دامنهٔ عمومی برای Ingress |
+| `NAMESPACE` | `codebase` | k8s namespace |
+| `NEXTAUTH_SECRET` | _(خالی)_ | اگه خالی باشه، `init` خودش می‌سازه |
+
+---
+
+## 🔁 Workflow هر fork
+
+```
+┌─────────────────┐
+│ GitHub Actions  │   push main / v* tag
+│ docker-publish  │ ──────────────────────────┐
+└─────────────────┘                           ▼
+                                    ┌──────────────────────┐
+                                    │ ghcr.io/<owner>/     │
+                                    │     codebase:latest  │
+                                    └──────────────────────┘
+                                                │
+                                                ▼
+┌──────────────────┐    setup.sh apply    ┌─────────────────┐
+│ IMAGE_OWNER=...  │ ───────────────────► │ kustomize builds │
+│ HOSTNAME=...     │                      │ with override   │
+└──────────────────┘                      └─────────────────┘
+                                                       │
+                                                       ▼
+                                              ┌─────────────────┐
+                                              │ cluster pulls   │
+                                              │ from ghcr.io    │
+                                              └─────────────────┘
+```
+
+---
+
+## 🛠️ کار با چندتا fork همزمان
+
+اگه می‌خوای چند تا نمونه از پروژه روی یه کلاستر بالا بیاری (مثلاً `staging` و
+`prod` یا چند تا پروژهٔ مشابه):
+
+### گزینهٔ ۱: namespace جدا (ساده)
+
+```bash
+# پروژهٔ اول
+IMAGE_OWNER=acme   HOSTNAME=app1.example.com   NAMESPACE=acme   ./k8s/setup.sh apply
+
+# پروژهٔ دوم (همون ریپو، fork دیگه)
+IMAGE_OWNER=acme   HOSTNAME=app2.example.com   NAMESPACE=acme2  ./k8s/setup.sh apply
+```
+
+PVC ها و ingress ها توی هر namespace جدا می‌مونن. هیچ تداخلی نیست.
+
+### گزینهٔ ۲: همون namespace، چندتا hostname
+
+اگه چند تا پروژه روی یه دامنهٔ parent می‌خوای (مثلاً `acme.com/app1` و
+`acme.com/app2`)، باید ingress path رو split کنی. این کار رو می‌تونی با
+**Kustomize overlays** انجام بدی — یه `overlays/<fork>/kustomization.yaml`
+بساز که hostname/path رو override می‌کنه. الگوی base + overlay در آینده
+اضافه می‌شه.
+
+---
+
+## 🔐 تنظیم ImagePullSecret (برای repoهای private)
+
+اگه image private هست و cluster بیرون از GitHub هست:
+
+```bash
+kubectl create secret docker-registry ghcr-pull \
+  --docker-server=ghcr.io \
+  --docker-username=<github-user> \
+  --docker-password=<github-pat-with-read:packages> \
+  --namespace=codebase
+```
+
+و توی `deployment.yaml` این خط رو اضافه کن (یا یه patch بنویس):
 
 ```yaml
-tls:
-  - hosts:
-      - app.example.com
-    secretName: codebase-tls
-```
-
-### ۴. اعمال manifest ها
-
-```bash
-cd /home/mohammadreza-mehrabani/projects/codebase/k8s
-
-# اول secret (که توی kustomization نیست):
-kubectl apply -f secret.yaml
-
-# بعد بقیه با kustomize:
-kubectl apply -k .
-
-# یا مستقیم:
-kubectl apply -f namespace.yaml
-kubectl apply -f configmap.yaml
-kubectl apply -f pvc.yaml
-kubectl apply -f deployment.yaml
-kubectl apply -f service.yaml
-kubectl apply -f ingress.yaml
-```
-
-### ۵. چک کردن وضعیت
-
-```bash
-kubectl -n codebase get pods,svc,ingress,pvc
-kubectl -n codebase logs -f deploy/codebase
-kubectl -n codebase describe ingress codebase
+spec:
+  imagePullSecrets:
+    - name: ghcr-pull
 ```
 
 ---
 
-## نکات مهم
+## 📌 نکات مهم
 
 ### چرا `replicas: 1` و `strategy: Recreate`؟
 
 `/app/db/custom.db` روی یه PVC با `ReadWriteOnce` mount می‌شه. چند پاد همزمان
-نمی‌تونن روی SQLite بنویسن و در نهایت فایل خراب می‌شه. `Recreate` هم تضمین
-می‌کنه هنگام آپدیت، پاد قدیمی قبل از پاد جدید کاملاً خاموش بشه.
+نمی‌تونن روی SQLite بنویسن. `Recreate` تضمین می‌کنه هنگام آپدیت، پاد قدیمی
+قبل از پاد جدید کاملاً خاموش بشه.
 
-اگه روزی خواستی HA داشته باشی:
+اگه روزی HA خواستی:
 1. `prisma/schema.prisma` رو از `sqlite` به `postgresql` تغییر بده
 2. یه PostgreSQL StatefulSet جدا اضافه کن
 3. `DATABASE_URL` رو توی ConfigMap عوض کن
@@ -127,30 +191,19 @@ kubectl -n codebase describe ingress codebase
    مقصد رو عوض کنه.
 2. **ریدایرکت خودکار HTTP→HTTPS** — توی Caddy رایگانه.
 
-اگه این قابلیت‌ها لازم نیست، می‌تونی Caddy رو از image حذف کنی و مستقیم
-Next.js (پورت 3000) رو پشت Ingress بذاری. اون وقت:
-- `deployment.yaml`: containerPort رو به 3000 عوض کن، probe path هم `/api`
-- `service.yaml`: targetPort رو به `nextjs` (3000) بذار
-- `configmap.yaml`: دیگه Caddyfile لازم نیست
+اگه لازم نیست، می‌تونی Caddy رو از image حذف کنی و مستقیم Next.js (پورت 3000)
+رو پشت Ingress بذاری.
 
 ### probe path
 
-از `/api` استفاده کردم چون `src/app/api/route.ts` یه GET handler ساده
-(`{"message":"Hello, world!"}`) داره و وابسته به client-side hydration نیست.
-اگه این route رو حذف کردی، یه `/api/health` اضافه کن.
-
-### Python runtime
-
-اگه پروژه از Python استفاده می‌کنه، `.zscripts/python-runtime-build.sh`
-رو توی مرحلهٔ build صدا بزن و `/app/python-runtime` رو توی image کپی کن.
-الان Dockerfile فرض می‌کنه این مرحله غیرضروریه. اگه لازم شد، مرحلهٔ
-`python-runtime-build.sh` رو با همون env vars به builder اضافه کن.
+از `/api` استفاده شده چون `src/app/api/route.ts` یه GET handler ساده
+(`{"message":"Hello, world!"}`) داره و وابسته به hydration کلاینت نیست.
 
 ---
 
-## عیب‌یابی
+## 🔧 عیب‌یابی
 
-**پاد Pending مونده:**
+**پاد Pending:**
 ```bash
 kubectl -n codebase describe pod <pod-name>
 # معمولاً PVC نمی‌تونه bind بشه — storage class رو چک کن.
@@ -168,24 +221,27 @@ kubectl -n codebase get endpoints codebase
 # اگه خالی بود، label selector Service با Pod match نمی‌کنه.
 ```
 
-**ImagePullBackOff (cluster نمی‌تونه image رو بکشه):**
+**ImagePullBackOff:**
 ```bash
 kubectl -n codebase describe pod <pod-name> | grep -A5 Events
-# معمولاً یعنی:
-# 1. Package توی ghcr.io private هست → ImagePullSecret بساز (مرحلهٔ ۲ رو چک کن)
-# 2. image name اشتباهه (owner رو عوض نکردی)
-# 3. image هنوز build نشده (workflow اول اجرا نشده)
+# معمولاً:
+# 1. Package توی ghcr.io private هست → ImagePullSecret بساز
+# 2. IMAGE_OWNER اشتباهه (یا export نشده)
 ```
 
-**`<owner>` رو جایگزین نکردی:**
+**می‌خوای ببینی چی deploy می‌شه قبل از apply:**
 ```bash
-grep -rn '<owner>' k8s/
-# اگه خروجی داد، یعنی هنوز عوض نشده. مراحل OWNER.example رو اجرا کن.
+IMAGE_OWNER=my-org ./k8s/setup.sh render | less
 ```
 
-**Next.js بالا نمی‌یاد:**
+---
+
+## 🧹 پاک کردن
+
 ```bash
-kubectl -n codebase exec -it <pod-name> -- sh
-# cd /app && ls -la .next/standalone/server.js
-# cd /app/next-service-dist (یا /.next/standalone) و bun server.js رو دستی اجرا کن
+NAMESPACE=codebase ./k8s/setup.sh delete
 ```
+
+این دستور namespace و secret رو کامل پاک می‌کنه. PVC هم به دلیل
+`persistentVolumeClaimReclaimPolicy: Delete` پاک می‌شه (بسته به storage
+class تنظیمات cluster ممکنه متفاوت باشه).
