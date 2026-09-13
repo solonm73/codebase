@@ -40,21 +40,21 @@ jobs:
       - name: Compute image tags
         id: meta
         run: |
-          # main push → :latest + :<sha>
-          # tag push   → :<tag> + :latest + :<sha>
-          TAGS="--tag ghcr.io/${IMAGE_NAME}:${GITHUB_SHA::7}"
+          # Build a JSON array — docker/build-push-action parses `tags:` as
+          # one tag per element, NOT a single space-joined string.
+          # The first tag becomes the canonical name in ghcr.io.
+          TAGS_JSON="[\"ghcr.io/${IMAGE_NAME}:${GITHUB_SHA::7}\"]"
 
           if [[ "${GITHUB_REF}" == "refs/heads/main" ]]; then
-            TAGS="${TAGS} --tag ghcr.io/${IMAGE_NAME}:latest"
+            TAGS_JSON="${TAGS_JSON%]},\"ghcr.io/${IMAGE_NAME}:latest\"]"
           fi
 
           if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
             TAG=${GITHUB_REF#refs/tags/}
-            TAGS="${TAGS} --tag ghcr.io/${IMAGE_NAME}:${TAG} --tag ghcr.io/${IMAGE_NAME}:latest"
+            TAGS_JSON="${TAGS_JSON%]},\"ghcr.io/${IMAGE_NAME}:${TAG}\",\"ghcr.io/${IMAGE_NAME}:latest\"]"
           fi
 
-          # Strip leading space
-          echo "tags=${TAGS}" >> "$GITHUB_OUTPUT"
+          echo "tags=${TAGS_JSON}" >> "$GITHUB_OUTPUT"
 
       - name: Build and push
         uses: docker/build-push-action@v6
