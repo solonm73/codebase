@@ -18,6 +18,10 @@ resources:
 #
 # Kustomize rewrites the `image:` field on every container it finds in the
 # Deployment, so forks don't have to edit any YAML.
+#
+# Requires Kustomize v5+ for the $(VAR) syntax. Older versions (K8s ≤ 1.20
+# shipped with kustomize v4) need the literal value here; setup.sh detects
+# this case and falls back to sed-based patching of the rendered output.
 images:
   - name: ghcr.io/your-org/codebase
     newName: ghcr.io/$(IMAGE_OWNER)/codebase
