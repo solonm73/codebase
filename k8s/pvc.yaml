@@ -1,0 +1,18 @@
+# SQLite + single-pod model → ReadWriteOnce is sufficient.
+# If you ever migrate to Postgres, delete this PVC and replace with a
+# StatefulSet + per-pod PVCs.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: codebase-db
+  namespace: codebase
+  labels:
+    app: codebase
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+  # Uncomment if your cluster lacks a default StorageClass.
+  # storageClassName: standard

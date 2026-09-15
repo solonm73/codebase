@@ -1,0 +1,81 @@
+name: Publish Docker image
+
+on:
+  push:
+    # Trigger on every push so feature branches can verify their build,
+    # but only publish to ghcr.io from main or version tags. Pull-request
+    # branches do NOT trigger this (use a separate workflow if you want
+    # PR builds).
+    branches:
+      - "*"
+    tags:
+      - "v*"
+
+env:
+  # ghcr.io/<owner>/<repo>. The repo name is taken from github.repository so we
+  # don't have to hardcode it — change here only if you push to a different
+  # registry.
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+
+    # Decide whether to publish:
+    #   - main branch            → publish :<sha> + :latest
+    #   - tag v*                 → publish :<sha> + :<tag> + :latest
+    #   - any other branch push  → build only (push: false), useful for CI
+    #
+    # Always run on push events. The `push:` flag on the build step
+    # decides whether to publish, so feature branches can still verify
+    # their build without affecting :latest.
+    if: github.event_name == 'push'
+
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        # Only need to log in when we're actually going to push.
+        if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          # Default tags produced by metadata-action:
+          #   push to main             → :<sha>, :latest
+          #   push tag v1.2.3          → :<sha>, :v1.2.3, :latest
+          #   push to feature/foo      → :<sha>, :feature-foo, :edge (when on default branch)
+          tags: |
+            type=sha,format=short
+            type=ref,event=branch,prefix=
+            type=ref,event=tag,prefix=
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: k8s/Dockerfile
+          # Push only on main or v* tags; on other branches build only.
+          push: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v') }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # The Dockerfile pins oven/bun:1 and installs caddy via apt —
+          # no --cache-from needed for this size. Re-add a cache step here
+          # if builds start taking > 2 min.
+          provenance: false

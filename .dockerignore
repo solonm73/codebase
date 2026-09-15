@@ -1,0 +1,78 @@
+# Files that should never enter the build context. Without this, `COPY . .`
+# in the Dockerfile drags in node_modules, .git, build artifacts, dev logs,
+# and shoves them into Docker's cache-key calculation — which makes builds
+# slow, unreproducible, and (when combined with `bun install`) can shadow
+# files that the install step needs to generate (e.g. .prisma).
+
+# VCS
+.git
+.gitignore
+.gitattributes
+
+# Dependencies (installed fresh inside the image)
+node_modules
+**/node_modules
+.pnp
+.pnp.js
+
+# Build output (rebuilt inside the image)
+.next
+.next/**
+out
+dist
+build
+
+# Local-only files
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+dev.log
+server.log
+.zscripts/dev.pid
+.zscripts/mini-service-*.log
+
+# Editor / OS noise
+.DS_Store
+.vscode
+.idea
+*.swp
+*.swo
+*~
+
+# Test artifacts
+coverage
+*.lcov
+
+# This repo's k8s dev artifacts — never needed in the production image
+k8s/secret.yaml
+# Allow the example template:
+!k8s/secret.yaml.example
+
+# Mini-services / runtime artifacts that exist in dev but shouldn't be in image
+mini-services-dist
+mini-services/node_modules
+mini-services/.bun
+
+# Workflow config (not needed in image)
+.github
+
+# Database files copied into the image at build time ONLY when the user
+# explicitly wants to bake in dev data. We exclude transient SQLite files
+# but keep the main DB itself so first-boot has a working database.
+db/*.db-journal
+db/*.db-shm
+db/*.db-wal
+
+# Python runtime artifacts (created at build time inside the image, not here)
+python-runtime
+__pycache__
+*.pyc
+.pytest_cache
+.venv
+venv

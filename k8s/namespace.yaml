@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: codebase
+  labels:
+    name: codebase
+    app.kubernetes.io/part-of: codebase

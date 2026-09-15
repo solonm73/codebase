@@ -1,0 +1,33 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: codebase
+
+resources:
+  - namespace.yaml
+  - configmap.yaml
+  - pvc.yaml
+  - deployment.yaml
+  - service.yaml
+  - ingress.yaml
+
+# Image registry reference. Default works for any GitHub repo that pushed
+# the image via .github/workflows/docker-publish.yml. Override per-fork by
+# exporting IMAGE_OWNER before running `kubectl apply -k` (or use
+# k8s/setup.sh which wraps this).
+#
+# Kustomize rewrites the `image:` field on every container it finds in the
+# Deployment, so forks don't have to edit any YAML.
+#
+# Requires Kustomize v5+ for the $(VAR) syntax. Older versions (K8s ≤ 1.20
+# shipped with kustomize v4) need the literal value here; setup.sh detects
+# this case and falls back to sed-based patching of the rendered output.
+images:
+  - name: ghcr.io/your-org/codebase
+    newName: ghcr.io/$(IMAGE_OWNER)/codebase
+    newTag: latest
+
+# secret.yaml.example is NOT included — copy it to secret.yaml, fill in real
+# values, and apply with `kubectl apply -f secret.yaml`. Keeping secrets out
+# of the manifest tree prevents accidental commits.
+
